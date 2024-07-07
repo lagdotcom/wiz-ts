@@ -1,6 +1,6 @@
 {
   "name": "wiz-ts",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "A new Wiz compiler that works how I want it in a language I understand",
   "author": "Paul Davies <lagdotcom@gmail.com>",
   "license": "UNLICENSED",

@@ -1,4 +1,15 @@
-import { Token, TokenData } from "./Tokenizer";
+import {
+  ArithmeticFactorTokens,
+  ArithmeticTermTokens,
+  AssignmentTokens,
+  BitShiftTokens,
+  BitwiseTokens,
+  ComparisonTokens,
+  Token,
+  TokenData,
+  UnaryPostfixTokens,
+  UnaryPrefixTokens,
+} from "./Tokenizer";
 
 export interface AssignmentExpression {
   type: "assignment";
@@ -311,28 +322,7 @@ export default class SyntaxEvaluator {
   assignment(): Expression {
     let expr = this.equality();
 
-    while (
-      this.match(
-        Token.EQUAL,
-        Token.OR_EQUAL,
-        Token.AND_EQUAL,
-        Token.DIV_EQUAL,
-        Token.EXP_EQUAL,
-        Token.MUL_EQUAL,
-        Token.NOT_EQUAL,
-        Token.LESS_EQUAL,
-        Token.LROT_EQUAL,
-        Token.PLUS_EQUAL,
-        Token.RROT_EQUAL,
-        Token.MINUS_EQUAL,
-        Token.ALSHIFT_EQUAL,
-        Token.ARSHIFT_EQUAL,
-        Token.LLSHIFT_EQUAL,
-        Token.LRSHIFT_EQUAL,
-        Token.LROT_CARRY_EQUAL,
-        Token.RROT_CARRY_EQUAL,
-      )
-    ) {
+    while (this.match(...AssignmentTokens)) {
       const op = this.matched();
       const right = this.assignment();
       expr = { type: "assignment", left: expr, op: op.type, right };
@@ -358,14 +348,7 @@ export default class SyntaxEvaluator {
   comparison(): Expression {
     let expr = this.term();
 
-    while (
-      this.match(
-        Token.GREATER,
-        Token.GREATER_EQUAL,
-        Token.LESS,
-        Token.LESS_EQUAL,
-      )
-    ) {
+    while (this.match(...ComparisonTokens)) {
       const op = this.matched();
       const right = this.term();
       expr = { type: "binary", left: expr, op: op.type, right };
@@ -378,16 +361,7 @@ export default class SyntaxEvaluator {
   term(): Expression {
     let expr = this.factor();
 
-    while (
-      this.match(
-        Token.PLUS,
-        Token.MINUS,
-        Token.OR,
-        Token.AND,
-        Token.EXP,
-        Token.BIT_INDEX,
-      )
-    ) {
+    while (this.match(...ArithmeticTermTokens, ...BitwiseTokens)) {
       const op = this.matched();
       const right = this.factor();
       expr = { type: "binary", left: expr, op: op.type, right };
@@ -400,20 +374,7 @@ export default class SyntaxEvaluator {
   factor(): Expression {
     let expr = this.coercion();
 
-    while (
-      this.match(
-        Token.MUL,
-        Token.DIV,
-        Token.ALSHIFT,
-        Token.ARSHIFT,
-        Token.LLSHIFT,
-        Token.LRSHIFT,
-        Token.RROT,
-        Token.LROT,
-        Token.RROT_CARRY,
-        Token.LROT_CARRY,
-      )
-    ) {
+    while (this.match(...ArithmeticFactorTokens, ...BitShiftTokens)) {
       const op = this.matched();
       const right = this.coercion();
       expr = { type: "binary", left: expr, op: op.type, right };
@@ -436,15 +397,7 @@ export default class SyntaxEvaluator {
   }
 
   unary(): Expression {
-    if (
-      this.match(
-        Token.MINUS,
-        Token.NOT,
-        Token.BITWISE_NEGATE,
-        Token.AND,
-        Token.MUL,
-      )
-    ) {
+    if (this.match(...UnaryPrefixTokens)) {
       const op = this.matched();
       const expr = this.unary();
       return { type: "unary", op: op.type, expr };
@@ -488,7 +441,7 @@ export default class SyntaxEvaluator {
   post(): Expression {
     let expr = this.member();
 
-    if (this.match(Token.INCREMENT, Token.DECREMENT)) {
+    if (this.match(...UnaryPostfixTokens)) {
       const op = this.matched();
       expr = { type: "post", expr, op: op.type };
     }
@@ -552,7 +505,7 @@ export default class SyntaxEvaluator {
 
   let(): Statement {
     const name = this.expectName();
-    this.expect(Token.EQUAL);
+    this.expect(Token.ASSIGN);
     const expression = this.expression();
     this.expect(Token.SEMI);
 
@@ -597,7 +550,7 @@ export default class SyntaxEvaluator {
 
   const(): Statement {
     const name = this.expectName();
-    this.expect(Token.EQUAL);
+    this.expect(Token.ASSIGN);
     const expression = this.expression();
     this.expect(Token.SEMI);
 
