@@ -12,6 +12,7 @@ export enum Token {
   BY = "BY",
   CONFIG = "CONFIG",
   CONST = "CONST",
+  CONSTDATA = "CONSTDATA",
   CONTINUE = "CONTINUE",
   DO = "DO",
   ELSE = "ELSE",
@@ -44,6 +45,7 @@ export enum Token {
   U8 = "U8",
   UNION = "UNION",
   VAR = "VAR",
+  VARDATA = "VARDATA",
   WHILE = "WHILE",
   WRITEONLY = "WRITEONLY",
 
@@ -200,6 +202,7 @@ const KeywordTokens = {
   by: Token.BY,
   config: Token.CONFIG,
   const: Token.CONST,
+  constdata: Token.CONSTDATA,
   continue: Token.CONTINUE,
   do: Token.DO,
   else: Token.ELSE,
@@ -232,6 +235,7 @@ const KeywordTokens = {
   u8: Token.U8,
   union: Token.UNION,
   var: Token.VAR,
+  vardata: Token.VARDATA,
   while: Token.WHILE,
   writeonly: Token.WRITEONLY,
 };
@@ -476,8 +480,9 @@ export default class Tokenizer {
       }
     }
 
-    return isKeyword(accumulator)
-      ? this.emit(KeywordTokens[accumulator], accumulator)
+    const keyword = accumulator.toLowerCase();
+    return isKeyword(keyword)
+      ? this.emit(KeywordTokens[keyword], accumulator)
       : this.emit(Token.NAME, accumulator);
   }
 

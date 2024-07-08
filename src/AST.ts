@@ -11,6 +11,11 @@ import {
   UnaryPrefixTokens,
 } from "./Tokenizer";
 
+export interface ArrayExpression {
+  type: "array";
+  values: Expression[];
+}
+
 export interface AssignmentExpression {
   type: "assignment";
   left: Expression;
@@ -75,6 +80,7 @@ export interface UnaryExpression {
 }
 
 export type Expression =
+  | ArrayExpression
   | AssignmentExpression
   | BinaryExpression
   | BoolExpression
@@ -91,6 +97,12 @@ export interface ArrayType {
   type: "array";
   wtype: WizType;
   size?: Expression;
+}
+
+export interface FuncType {
+  type: "func";
+  args: FuncArg[];
+  returns?: FuncReturn;
 }
 
 const numericTypes = [
@@ -116,23 +128,50 @@ export interface PointerType {
   wtype: WizType;
 }
 
-export type WizType = ArrayType | NumericType | PointerType;
+export type WizType = ArrayType | FuncType | NumericType | PointerType;
 
-export interface ConstStatement {
-  type: "const";
-  name: string;
-  expression: Expression;
+interface StatementBase {
+  start: number;
+  end: number;
 }
 
-export interface DoStatement {
+export interface BankStatement extends StatementBase {
+  type: "bank";
+  name: string;
+  address: number;
+  wtype: Token;
+  size: number;
+}
+
+export interface DeclarationStatement extends StatementBase {
+  type: "declaration";
+  extern: boolean;
+  flavour: "const" | "var" | "writeonly";
+  name: string;
+  wtype?: WizType;
+  address?: number;
+  storage?: string;
+  expression?: Expression;
+}
+
+export interface DoStatement extends StatementBase {
   type: "do";
   contents: Statement[];
   expression: Expression;
 }
 
-export interface ExpressionStatement {
+export interface ExpressionStatement extends StatementBase {
   type: "expression";
   expression: Expression;
+}
+
+export interface ForStatement extends StatementBase {
+  type: "for";
+  inline: boolean;
+  loopVariable: string;
+  loopStart: number;
+  loopEnd: number;
+  contents: Statement[];
 }
 
 interface FuncArg {
@@ -143,59 +182,68 @@ interface FuncArg {
 
 type FuncReturn = Omit<FuncArg, "name">;
 
-export interface FuncStatement {
+export interface FuncStatement extends StatementBase {
   type: "func";
   annotations: string[];
+  inline: boolean;
   name: string;
   args: FuncArg[];
   returns?: FuncReturn;
   contents: Statement[];
 }
 
+export interface GotoStatement extends StatementBase {
+  type: "goto";
+  absolute: boolean;
+  destination: Expression;
+  expression?: Expression;
+}
+
 interface IfBranch {
   expression: Expression;
   contents: Statement[];
+  start: number;
+  end: number;
 }
 
-export interface IfStatement {
+export interface IfStatement extends StatementBase {
   type: "if";
+  setup?: Statement[];
   positive: IfBranch;
   elseIfs: IfBranch[];
   negative: Statement[];
 }
 
-export interface ImportStatement {
+export interface ImportStatement extends StatementBase {
   type: "import";
   value: string;
 }
 
-export interface InStatement {
+export interface InStatement extends StatementBase {
   type: "in";
   area: string;
   address?: number;
   contents: Statement[];
 }
 
-export interface LetStatement {
+export interface LabelStatement extends StatementBase {
+  type: "label";
+  name: string;
+}
+
+export interface LetStatement extends StatementBase {
   type: "let";
   name: string;
   expression: Expression;
 }
 
-export interface NamespaceStatement {
+export interface NamespaceStatement extends StatementBase {
   type: "namespace";
-  value: string;
+  name: string;
   contents: Statement[];
 }
 
-export interface VarStatement {
-  type: "var";
-  name: string;
-  wtype: WizType;
-  storage?: string;
-}
-
-export interface WhileStatement {
+export interface WhileStatement extends StatementBase {
   type: "while";
   absolute: boolean;
   expression: Expression;
@@ -203,16 +251,19 @@ export interface WhileStatement {
 }
 
 export type Statement =
-  | ConstStatement
+  | BankStatement
+  | DeclarationStatement
   | DoStatement
   | ExpressionStatement
+  | ForStatement
   | FuncStatement
+  | GotoStatement
   | IfStatement
   | ImportStatement
   | InStatement
+  | LabelStatement
   | LetStatement
   | NamespaceStatement
-  | VarStatement
   | WhileStatement;
 
 export default class SyntaxEvaluator {
@@ -248,13 +299,13 @@ export default class SyntaxEvaluator {
   die(message: string) {
     const t = this.matched();
     return new Error(
-      `[line ${t.line}, col ${t.col}] ${message}, got ${t.type} "${t.value}"`,
+      `${this.filename} [line ${t.line}, col ${t.col}] ${message}, got ${t.type} "${t.value}"`,
     );
   }
 
-  expect(type: Token) {
+  expect(...types: Token[]) {
     const t = this.next();
-    if (t.type !== type) throw this.die(`expected ${type}`);
+    if (!types.includes(t.type)) throw this.die(`expected ${types.join("/")}`);
 
     return t;
   }
@@ -287,23 +338,59 @@ export default class SyntaxEvaluator {
   statement(): Statement {
     const t = this.next();
 
-    if (t.type === Token.IMPORT) return this.import();
-    if (t.type === Token.IN) return this.in();
-    if (t.type === Token.NAMESPACE) return this.namespace();
-    if (t.type === Token.LET) return this.let();
-    if (t.type === Token.VAR) return this.var();
-    if (t.type === Token.CONST) return this.const();
-    if (t.type === Token.FUNC) return this.func();
-    if (t.type === Token.DO) return this.do();
-    if (t.type === Token.IF) return this.if();
-    if (t.type === Token.WHILE || t.type === Token.WHILE_ABS)
-      return this.while(t.type === Token.WHILE_ABS);
-    if (t.type === Token.ANNOTATION) return this.annotation();
+    switch (t.type) {
+      case Token.IMPORT:
+        return this.import();
+      case Token.IN:
+        return this.in();
+      case Token.NAMESPACE:
+        return this.namespace();
+      case Token.LET:
+        return this.let();
+      case Token.EXTERN:
+        return this.extern();
+      case Token.VAR:
+        return this.var();
+      case Token.CONST:
+        return this.const();
+      case Token.WRITEONLY:
+        return this.writeonly();
+      case Token.BANK:
+        return this.bank();
+      case Token.INLINE:
+        return this.inline();
+      case Token.FUNC:
+        return this.func();
+      case Token.DO:
+        return this.do();
+      case Token.IF:
+        return this.if();
+
+      case Token.ANNOTATION:
+        return this.annotation();
+
+      case Token.WHILE:
+      case Token.WHILE_ABS:
+        return this.while(t.type === Token.WHILE_ABS);
+
+      case Token.GOTO:
+      case Token.GOTO_ABS:
+        return this.goto(t.type === Token.GOTO_ABS);
+    }
+
+    if (t.type === Token.NAME && this.match(Token.COLON)) {
+      const start = this.i - 2;
+      const end = this.i;
+      return { type: "label", name: t.value, start, end };
+    }
 
     this.rewind();
+    const start = this.i;
     const expression = this.expression();
     this.expect(Token.SEMI);
-    return { type: "expression", expression };
+    const end = this.i;
+
+    return { type: "expression", expression, start, end };
   }
 
   scope() {
@@ -464,64 +551,136 @@ export default class SyntaxEvaluator {
   primary(): Expression {
     const t = this.next();
 
-    if (t.type === Token.NUMBER)
-      return { type: "number", value: t.valueAsNumber };
-    if (t.type === Token.NAME) return { type: "name", value: t.value };
+    switch (t.type) {
+      case Token.NUMBER:
+        return { type: "number", value: t.valueAsNumber };
+      case Token.NAME:
+        return { type: "name", value: t.value };
+      case Token.TRUE:
+        return { type: "bool", value: true };
+      case Token.FALSE:
+        return { type: "bool", value: false };
+      case Token.EMBED:
+        return { type: "embed", value: this.expectString() };
 
-    if (t.type === Token.LPAREN) {
-      const expr = this.expression();
-      this.expect(Token.RPAREN);
-      return { type: "group", expr };
+      case Token.LPAREN: {
+        const expr = this.expression();
+        this.expect(Token.RPAREN);
+        return { type: "group", expr };
+      }
+
+      case Token.LBRACKET: {
+        const values: Expression[] = [];
+        while (!this.match(Token.RBRACKET)) {
+          if (values.length) this.expect(Token.COMMA);
+          values.push(this.expression());
+        }
+
+        return { type: "array", values };
+      }
     }
-
-    if (t.type === Token.TRUE) return { type: "bool", value: true };
-    else if (t.type === Token.FALSE) return { type: "bool", value: false };
-    else if (t.type === Token.EMBED)
-      return { type: "embed", value: this.expectString() };
 
     throw this.die(`invalid primary`);
   }
 
   import(): Statement {
+    const start = this.i - 1;
     const value = this.expectString();
     this.expect(Token.SEMI);
+    const end = this.i;
 
-    return { type: "import", value };
+    return { type: "import", value, start, end };
   }
 
   in(): Statement {
+    const start = this.i - 1;
     const area = this.expectName();
 
     let address: number | undefined;
     if (this.match(Token.AT)) address = this.expectNumber();
 
-    return { type: "in", area, address, contents: this.scope() };
+    const contents = this.scope();
+    const end = this.i;
+
+    return { type: "in", area, address, contents, start, end };
   }
 
   namespace(): Statement {
-    const value = this.expectName();
-    return { type: "namespace", value, contents: this.scope() };
+    const start = this.i - 1;
+    const name = this.expectName();
+    const contents = this.scope();
+    const end = this.i;
+
+    return { type: "namespace", name, contents, start, end };
   }
 
   let(): Statement {
+    const start = this.i - 1;
     const name = this.expectName();
     this.expect(Token.ASSIGN);
     const expression = this.expression();
     this.expect(Token.SEMI);
+    const end = this.i;
 
-    return { type: "let", name, expression };
+    return { type: "let", name, expression, start, end };
   }
 
-  var(): Statement {
+  declaration(
+    extern: boolean,
+    flavour: "const" | "var" | "writeonly",
+  ): Statement {
+    const start = this.i - (extern ? 2 : 1);
     const name = this.expectName();
-    this.expect(Token.COLON);
-    const wtype = this.type();
+
+    let address: number | undefined;
+    if (this.match(Token.AT)) address = this.expectNumber();
+
+    let wtype: WizType | undefined;
+    if (this.match(Token.COLON)) wtype = this.type();
 
     let storage: string | undefined;
     if (this.match(Token.IN)) storage = this.expectName();
 
+    let expression: Expression | undefined;
+    if (this.match(Token.ASSIGN)) expression = this.expression();
+
     this.expect(Token.SEMI);
-    return { type: "var", name, wtype, storage };
+    const end = this.i;
+
+    return {
+      type: "declaration",
+      extern,
+      flavour,
+      name,
+      address,
+      wtype,
+      storage,
+      expression,
+      start,
+      end,
+    };
+  }
+
+  var(extern = false): Statement {
+    return this.declaration(extern, "var");
+  }
+
+  const(extern = false): Statement {
+    return this.declaration(extern, "const");
+  }
+
+  writeonly(extern = false): Statement {
+    return this.declaration(extern, "writeonly");
+  }
+
+  extern(): Statement {
+    const t = this.expect(Token.VAR, Token.CONST, Token.WRITEONLY);
+
+    if (t.type === Token.VAR) return this.var(true);
+    if (t.type === Token.CONST) return this.const(true);
+    if (t.type === Token.WRITEONLY) return this.writeonly(true);
+
+    throw new Error("please");
   }
 
   type(): WizType {
@@ -541,6 +700,23 @@ export default class SyntaxEvaluator {
       return { type: "array", wtype, size };
     }
 
+    if (this.match(Token.FUNC)) {
+      this.expect(Token.LPAREN);
+      const args = this.arguments();
+
+      let returns: FuncReturn | undefined;
+      if (this.match(Token.COLON)) {
+        const wtype = this.type();
+
+        let storage: string | undefined;
+        if (this.match(Token.IN)) storage = this.expectName();
+
+        returns = { wtype, storage };
+      }
+
+      return { type: "func", args, returns };
+    }
+
     const t = this.next();
     if (numericTypes.includes(t.value as NumericTypeString))
       return { type: t.value as NumericTypeString };
@@ -548,16 +724,15 @@ export default class SyntaxEvaluator {
     throw this.die(`expected type`);
   }
 
-  const(): Statement {
-    const name = this.expectName();
-    this.expect(Token.ASSIGN);
-    const expression = this.expression();
-    this.expect(Token.SEMI);
-
-    return { type: "const", name, expression };
-  }
-
-  func(annotations: string[] = []): Statement {
+  func({
+    annotations = [],
+    inline = false,
+    start = this.i - 1,
+  }: {
+    annotations?: string[];
+    inline?: boolean;
+    start?: number;
+  } = {}): Statement {
     const name = this.expectName();
     this.expect(Token.LPAREN);
     const args = this.arguments();
@@ -572,13 +747,19 @@ export default class SyntaxEvaluator {
       returns = { wtype, storage };
     }
 
+    const contents = this.scope();
+    const end = this.i;
+
     return {
       type: "func",
       annotations,
+      inline,
       name,
       args,
       returns,
-      contents: this.scope(),
+      contents,
+      start,
+      end,
     };
   }
 
@@ -586,6 +767,8 @@ export default class SyntaxEvaluator {
     const value: FuncArg[] = [];
 
     while (!this.match(Token.RPAREN)) {
+      if (value.length) this.expect(Token.COMMA);
+
       const name = this.expectName();
       this.expect(Token.COLON);
       const wtype = this.type();
@@ -600,16 +783,28 @@ export default class SyntaxEvaluator {
   }
 
   do(): Statement {
+    const start = this.i - 1;
     const contents = this.scope();
     this.expect(Token.WHILE);
 
     const expression = this.expression();
     this.expect(Token.SEMI);
+    const end = this.i;
 
-    return { type: "do", contents, expression };
+    return { type: "do", contents, expression, start, end };
   }
 
   if(): Statement {
+    const start = this.i - 1;
+
+    // this is kinda fragile
+    let setup: Statement[] | undefined;
+    if (this.match(Token.LBRACE)) {
+      this.rewind();
+      setup = this.scope();
+      this.expect(Token.LOGIC_AND);
+    }
+
     const positive = this.ifBranch();
 
     const elseIfs: IfBranch[] = [];
@@ -624,30 +819,103 @@ export default class SyntaxEvaluator {
       break;
     }
 
-    return { type: "if", positive, elseIfs, negative };
+    const end = this.i;
+    return { type: "if", setup, positive, elseIfs, negative, start, end };
   }
 
   ifBranch(): IfBranch {
+    const start = this.i;
     const expression = this.expression();
     const contents = this.scope();
+    const end = this.i;
 
-    return { expression, contents };
+    return { expression, contents, start, end };
   }
 
   while(absolute: boolean): Statement {
+    const start = this.i - 1;
     const expression = this.expression();
     const contents = this.scope();
+    const end = this.i;
 
-    return { type: "while", absolute, expression, contents };
+    return { type: "while", absolute, expression, contents, start, end };
+  }
+
+  goto(absolute: boolean): Statement {
+    const start = this.i - 1;
+    const destination = this.expression();
+
+    let expression: Expression | undefined;
+    if (this.match(Token.IF)) expression = this.expression();
+
+    this.expect(Token.SEMI);
+    const end = this.i;
+
+    return { type: "goto", absolute, destination, expression, start, end };
   }
 
   annotation(): Statement {
+    const start = this.i - 1;
     this.expect(Token.LBRACKET);
 
     const annotations: string[] = [];
     while (!this.match(Token.RBRACKET)) annotations.push(this.expectName());
 
     this.expect(Token.FUNC);
-    return this.func(annotations);
+    return this.func({ annotations, start });
+  }
+
+  bank(): Statement {
+    const start = this.i - 1;
+    const name = this.expectName();
+    this.expect(Token.AT);
+    const address = this.expectNumber();
+    this.expect(Token.COLON);
+    this.expect(Token.LBRACKET);
+    const type = this.expect(Token.CONSTDATA, Token.VARDATA);
+    this.expect(Token.SEMI);
+    const size = this.expectNumber();
+    this.expect(Token.RBRACKET);
+    this.expect(Token.SEMI);
+    const end = this.i;
+
+    return { type: "bank", name, address, wtype: type.type, size, start, end };
+  }
+
+  inline(): Statement {
+    const start = this.i - 1;
+
+    if (this.match(Token.FOR)) return this.for({ inline: true, start });
+    if (this.match(Token.FUNC)) return this.func({ inline: true, start });
+
+    throw this.die(`expected for/func`);
+  }
+
+  for({
+    inline = false,
+    start = this.i - 1,
+  }: {
+    inline?: boolean;
+    start?: number;
+  }): Statement {
+    this.expect(Token.LET);
+    const loopVariable = this.expectName();
+    this.expect(Token.IN);
+    const loopStart = this.expectNumber();
+    this.expect(Token.RANGE);
+    const loopEnd = this.expectNumber();
+    const contents = this.scope();
+
+    const end = this.i;
+    return {
+      type: "for",
+      inline,
+      start,
+      end,
+      loopVariable,
+      loopStart,
+      loopEnd,
+      contents,
+    };
   }
 }
